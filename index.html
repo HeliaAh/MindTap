@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Number Cycler</title>
+  <title>EEG Number Cycler</title>
   <style>
     body {
       margin: 0;
@@ -23,23 +23,23 @@
       border: 2px solid #b8b8b8;
       border-radius: 12px;
       font-size: 2rem;
-      position: absolute; /* so we can pin them to corners */
+      position: absolute;
+      transition: background-color 120ms, border 120ms, transform 120ms;
     }
 
-    .on {
-      border: 4px solid #2ecc71;
-    }
+    /* Green outline for “currently lit” */
+    .on { border: 4px solid #2ecc71; }
 
-    .selected {
-      background-color: #fc2626b9;
-    }
+    /* Red fill for “selected” */
+    .selected { background-color: #dc1313; color: white; }
 
     /* Corner placement */
-    #box1 { top: 200px; left: 300px; }      /* top-left */
-    #box2 { top: 200px; right: 300px; }     /* top-right */
-    #box3 { bottom: 200px; left: 300px; }   /* bottom-left */
-    #box4 { bottom: 200px; right: 300px; }  /* bottom-right */
+    #box1 { top: 60px; left: 60px; }
+    #box2 { top: 60px; right: 60px; }
+    #box3 { bottom: 60px; left: 60px; }
+    #box4 { bottom: 60px; right: 60px; }
 
+    /* HUD */
     .hud {
       position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
       background: white; padding: 10px 14px; border: 1px solid #ddd; border-radius: 10px;
@@ -49,7 +49,6 @@
     .hud code { background:#f2f2f2; padding:2px 6px; border-radius:6px; }
     button { padding: 6px 10px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
   </style>
-  
 </head>
 <body>
   <div id="box1" class="cell">1</div>
@@ -68,37 +67,146 @@
     <label>Hysteresis: <input id="hyst" type="number" value="0.2" step="0.05" style="width:64px"></label>
   </div>
 
-<body>
-  <div id="box1" class="cell">1</div>
-  <div id="box2" class="cell">2</div>
-  <div id="box3" class="cell">3</div>
-  <div id="box4" class="cell">4</div>
-
   <script>
+    // ===== UI / cycling =====
     const cells = Array.from(document.querySelectorAll('.cell'));
-    let idx = 0; // start on the first cell
+    let idx = 0;
     cells[idx].classList.add('on');
-  
-    // Select the CURRENT (red) cell immediately when Space is pressed
-    addEventListener('keydown', e => {
-      if (e.code === 'Space') {
-        e.preventDefault();           // stop page from scrolling
-        cells[idx].classList.add('selected');
-        console.log('Selected', idx + 1);
-      }
-    });
-  
+
     function cycle() {
       cells[idx].classList.remove('on');
       idx = (idx + 1) % cells.length;
 
-      if (idx === 0) {
-    cells.forEach(c => c.classList.remove('selected'));
-    }
+      // Reset selections when wrapping to first cell (fresh lap)
+      if (idx === 0) cells.forEach(c => c.classList.remove('selected'));
 
       cells[idx].classList.add('on');
     }
-  
-    setInterval(cycle, 1200); // cycles every 1200ms
+    const CYCLE_MS = 1200;
+    setInterval(cycle, CYCLE_MS);
+
+    // ===== EEG pipeline (hook your real signal into onEEG(value)) =====
+    // Moving average smoothing (window N)
+    const WINDOW = 10;
+    const buf = [];
+    let sum = 0;
+
+    // Baseline + autodetected threshold
+    let baseline = 0;
+    let threshold = 0;
+
+    // Edge detection with hysteresis + cooldown
+    let armed = true;            // true means we are waiting for a rising edge
+    let lastFire = 0;
+
+    const elEEG = document.getElementById('eegVal');
+    const elSmooth = document.getElementById('smoothVal');
+    const elBase = document.getElementById('baselineVal');
+    const elThresh = document.getElementById('threshVal');
+    const elCool = document.getElementById('cool');
+    const elHyst = document.getElementById('hyst');
+
+    function onEEG(value) {
+      // 1) show raw
+      elEEG.textContent = value.toFixed(3);
+
+      // 2) moving average
+      buf.push(value);
+      sum += value;
+      if (buf.length > WINDOW) sum -= buf.shift();
+      const smooth = sum / buf.length;
+      elSmooth.textContent = Number.isFinite(smooth) ? smooth.toFixed(3) : '—';
+
+      // 3) thresholds
+      const coolMs = parseInt(elCool.value || '600', 10);
+      const hyster = parseFloat(elHyst.value || '0.2');
+
+      const upper = threshold;                 // cross above to trigger
+      const lower = baseline + hyster * (threshold - baseline); // drop below to re-arm
+
+      const now = performance.now();
+
+      if (armed && smooth > upper && (now - lastFire) > coolMs) {
+        // rising edge detected -> select current cell
+        cells[idx].classList.add('selected');
+        lastFire = now;
+        armed = false;
+        // Optional: if you want to lock the selection to the *previous* cell instead:
+        // const prev = (idx - 1 + cells.length) % cells.length;
+        // cells[prev].classList.add('selected');
+      } else if (!armed && smooth < lower) {
+        // fell back below lower band -> re-arm
+        armed = true;
+      }
+    }
+
+    // ===== Calibration: measure baseline for 1 sec and auto threshold =====
+    document.getElementById('btnCal').addEventListener('click', () => {
+      const samples = [];
+      const t0 = performance.now();
+      const dur = 1000; // 1s
+      const handler = (v) => samples.push(v);
+
+      // Attach a temporary tap into onEEG
+      const origOnEEG = onEEG;
+      window.onEEG = function(v) {
+        handler(v);
+        origOnEEG(v);
+      };
+
+      setTimeout(() => {
+        // Restore
+        window.onEEG = origOnEEG;
+
+        if (samples.length) {
+          // baseline = mean of smoothed-ish values
+          const mean = samples.reduce((a,b)=>a+b,0) / samples.length;
+          // robust spread estimate
+          const med = samples.slice().sort((a,b)=>a-b)[Math.floor(samples.length/2)];
+          const mad = samples.map(x => Math.abs(x - med)).sort((a,b)=>a-b)[Math.floor(samples.length/2)] || 0.001;
+
+          baseline = mean;
+          // threshold = baseline + k * MAD  (k=6 is a decent starting point)
+          threshold = baseline + 6 * mad;
+
+          elBase.textContent = baseline.toFixed(3);
+          elThresh.textContent = threshold.toFixed(3);
+
+          // Re-arm detector after calibration
+          armed = true;
+        }
+      }, dur);
+    });
+
+    // ===== Simulation (remove when hooking real EEG) =====
+    const btnSim = document.getElementById('btnSim');
+    let simOn = false, simTimer = null;
+
+    btnSim.addEventListener('click', () => {
+      simOn = !simOn;
+      btnSim.textContent = simOn ? 'Sim: On' : 'Sim: Off';
+      if (simOn) startSim(); else stopSim();
+    });
+
+    function startSim() {
+      // Baseline ~ 1.0 ± noise, with occasional bursts upwards (as if “intent”)
+      let t = 0;
+      simTimer = setInterval(() => {
+        t += 0.02;
+        const noise = 0.05 * (Math.random() - 0.5);
+        let v = 1.0 + 0.03*Math.sin(2*Math.PI*0.7*t) + noise;
+        // Random burst
+        if (Math.random() < 0.04) v += 0.6 + Math.random()*0.5;
+        onEEG(v);
+      }, 20); // 50 Hz stream
+    }
+    function stopSim() { clearInterval(simTimer); simTimer = null; }
+
+    // Expose onEEG globally so you can feed real data: window.onEEG(value)
+    window.onEEG = onEEG;
+
+    // Optional: quick manual calibration at start of sim
+    // (Click "Calibrate" after a second or two for a better baseline.)
   </script>
-  
+</body>
+</html>
