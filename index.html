@@ -34,10 +34,10 @@
     .selected { background-color: #dc1313; color: white; }
 
     /* Corner placement */
-    #box1 { top: 60px; left: 60px; }
-    #box2 { top: 60px; right: 60px; }
-    #box3 { bottom: 60px; left: 60px; }
-    #box4 { bottom: 60px; right: 60px; }
+    #box1 { top: 200px; left: 300px; }
+    #box2 { top: 200px; right: 300px; }
+    #box3 { bottom: 200px; left: 300px; }
+    #box4 { bottom: 200px; right: 300px; }
 
     /* HUD */
     .hud {
@@ -61,7 +61,7 @@
     <label>Smoothed: <code id="smoothVal">—</code></label>
     <label>Baseline: <code id="baselineVal">—</code></label>
     <label>Threshold: <code id="threshVal">—</code></label>
-    <button id="btnCal">Calibrate (1s)</button>
+    <button id="btnCal">Calibrate (30s)</button>
     <button id="btnSim">Sim: Off</button>
     <label>Cooldown(ms): <input id="cool" type="number" value="600" style="width:64px"></label>
     <label>Hysteresis: <input id="hyst" type="number" value="0.2" step="0.05" style="width:64px"></label>
@@ -82,7 +82,7 @@
 
       cells[idx].classList.add('on');
     }
-    const CYCLE_MS = 1200;
+    const CYCLE_MS = 1250;
     setInterval(cycle, CYCLE_MS);
 
     // ===== EEG pipeline (hook your real signal into onEEG(value)) =====
@@ -144,7 +144,7 @@
     document.getElementById('btnCal').addEventListener('click', () => {
       const samples = [];
       const t0 = performance.now();
-      const dur = 1000; // 1s
+      const dur = 30000; // 30s
       const handler = (v) => samples.push(v);
 
       // Attach a temporary tap into onEEG
@@ -178,15 +178,12 @@
       }, dur);
     });
 
-    // ===== Simulation (remove when hooking real EEG) =====
-    const btnSim = document.getElementById('btnSim');
-    let simOn = false, simTimer = null;
-
-    btnSim.addEventListener('click', () => {
-      simOn = !simOn;
-      btnSim.textContent = simOn ? 'Sim: On' : 'Sim: Off';
-      if (simOn) startSim(); else stopSim();
-    });
+    //Connecting to OpenBCI
+    const ws = new WebSocket("ws://localhost:8080");
+    ws.onmessage = (msg) => {
+      const val = parseFloat(msg.data);
+      if (!isNaN(val)) window.onEEG(val);
+    };
 
     function startSim() {
       // Baseline ~ 1.0 ± noise, with occasional bursts upwards (as if “intent”)
@@ -207,6 +204,19 @@
 
     // Optional: quick manual calibration at start of sim
     // (Click "Calibrate" after a second or two for a better baseline.)
+
+    let simTimer = null;                 // <— you referenced this but never declared it
+    const btnSim = document.getElementById('btnSim');
+
+    btnSim.addEventListener('click', () => {
+      if (simTimer) {
+        stopSim();
+        btnSim.textContent = 'Sim: Off';
+      } else {
+        startSim();
+        btnSim.textContent = 'Sim: On';
+      }
+    });
   </script>
 </body>
 </html>

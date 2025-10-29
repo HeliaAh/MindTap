@@ -1,0 +1,3 @@
+{
+    "cmake.sourceDirectory": "${workspaceFolder}/Applications/MATLAB_R2025b.app/polyspace/verifier/cxx/include/include-libcxx"
+}
