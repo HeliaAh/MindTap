@@ -57,6 +57,7 @@
   <div id="box4" class="cell">4</div>
 
   <div class="hud">
+    <button id="btnCsv">Download CSV</button>
     <label>EEG: <code id="eegVal">—</code></label>
     <label>Smoothed: <code id="smoothVal">—</code></label>
     <label>Baseline: <code id="baselineVal">—</code></label>
@@ -81,7 +82,27 @@
       if (idx === 0) cells.forEach(c => c.classList.remove('selected'));
 
       cells[idx].classList.add('on');
+
+        // ---- Log this change for CSV using universal time (UTC) ----
+        const now = new Date();
+        const currentNumber = cells[idx].textContent.trim();
+
+        cycleLog.push({
+        iso: now.toISOString(),   // e.g. 2025-11-15T22:04:12.345Z (UTC)
+        epochMs: now.getTime(),   // ms since 1970-01-01 UTC
+        number: currentNumber
+      });
     }
+
+    // ===== Logging for CSV =====
+    const cycleLog = [];                    // { t: ms since start, number: '1'..'4' }
+
+    // Log initial state (optional)
+    cycleLog.push({
+      t: 0,
+      number: cells[idx].textContent.trim()
+    });
+
     const CYCLE_MS = 1250;
     setInterval(cycle, CYCLE_MS);
 
@@ -217,6 +238,31 @@
         btnSim.textContent = 'Sim: On';
       }
     });
+
+    // ===== CSV download =====
+    const btnCsv = document.getElementById('btnCsv');
+
+    btnCsv.addEventListener('click', () => {
+    if (cycleLog.length === 0) return;
+
+    // Header row
+    let csv = 'timestamp_iso,epoch_ms,number\n';
+    csv += cycleLog
+      .map(row => `${row.iso},${row.epochMs},${row.number}`)
+      .join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'number_changes.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
   </script>
 </body>
 </html>

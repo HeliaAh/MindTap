@@ -1,5 +1,4 @@
-"Guneev"
-# eeg_server.py
+    # eeg_server.py
 from brainflow.board_shim import BoardShim, BrainFlowInputParams, BoardIds
 from brainflow.data_filter import DataFilter, DetrendOperations, FilterTypes, NoiseTypes
 from websocket_server import WebsocketServer
@@ -7,17 +6,15 @@ import numpy as np
 import time, threading, sys, glob
 import csv
 from datetime import datetime
-import pandas as pd 
-from scipy import signal
-import matplotlib.pyplot as plt
 
 # ===== CONFIG =====
-BOARD_ID     = BoardIds.CYTON_BOARD   # use SYNTHETIC_BOARD for a quick test
+BOARD_ID     = BoardIds.CYTON_BOARD         # use SYNTHETIC_BOARD for a quick test
 SERIAL_PORT  = ""                           # leave empty to auto-detect /dev/cu.*
 WS_PORT      = 8080
 SAMPLE_BATCH = 50
 TICK_SEC     = 0.02
 USE_N_CHANS  = 8                            # average this many EEG channels
+WINDOW_SIZE = 1000
 # ==================
 
 def resolve_serial_port(requested: str) -> str:
@@ -127,6 +124,12 @@ def main():
             if data is None or data.size == 0:
                 time.sleep(TICK_SEC); continue
 
+            # === CONVERT RAW COUNTS TO MICROVOLTS ===
+            CONVERSION_FACTOR = 0.02235  # µV per count for Cyton (gain=24)
+            data = data.astype(np.float64)  # make sure it's float
+            eeg_chans = board.get_eeg_channels(BOARD_ID)
+            data[eeg_chans, :] *= CONVERSION_FACTOR
+
             X = data[chans, :].astype(np.float64)  # (n_ch, n_samples)
             if X.size == 0:
                 time.sleep(SAMPLE_BATCH / fs); continue
@@ -139,8 +142,6 @@ def main():
                 signal_buffer = deque(maxlen=int(fs * 4))  # 4-second rolling window
 
             signal_buffer.extend(avg_signal)
-
-            WINDOW_SIZE = 1000
 
             if len(signal_buffer) >= WINDOW_SIZE:  # need at  1s of data
                 sig = np.array(list(signal_buffer)[-WINDOW_SIZE:], dtype=np.float64)
@@ -157,15 +158,15 @@ def main():
 
                 # Compute band powers
                 delta = compute_band_power(freqs, psd, (0.5, 4))
-                theta = compute_band_power(freqs, psd, (4, 7))
+                theta = compute_band_power(freqs, psd, (4, 8))
                 alpha = compute_band_power(freqs, psd, (8, 12))
-                beta  = compute_band_power(freqs, psd, (13, 30))
+                beta  = compute_band_power(freqs, psd, (12, 30))
                 gamma = compute_band_power(freqs, psd, (30, 40))
             else:
                 delta = theta = alpha = beta = gamma = 0.0
 
 
-            '''##rms_vals = []
+            rms_vals = []
             for r in range(X.shape[0]):
                 v = X[r].copy()
                 # Detrend (remove DC)
@@ -179,10 +180,10 @@ def main():
                     # Fallback: band-stop 58–62 Hz
                     DataFilter.perform_bandstop(v, fs, 58.0, 62.0, 4, FilterTypes.BUTTERWORTH.value, 0.0)
                 # RMS amplitude
-                rms_vals.append(np.sqrt(np.mean(v**2)))'''
-            latest_vals = X[:, -1]                  # last sample per channel
+                rms_vals.append(np.sqrt(np.mean(v**2)))
+            ##latest_vals = X[:, -1]                  # last sample per channel
 
-            feature = float(np.mean(latest_vals))  # average across selected channels
+            feature = float(np.mean(rms_vals))  # average across selected channels
             server.send_message_to_all(str(feature))
 
 

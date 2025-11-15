@@ -22,7 +22,7 @@ line, = ax.plot([], [], lw=2, color="royalblue")
 ax.set_xlabel("Time since start (s)")
 ax.set_ylabel("Avg RMS (µV)")
 ax.set_title("Live EEG RMS Stream")
-ax.set_ylim(0, 250)   # adjust upper limit if your spikes are huge
+ax.set_ylim(0, 2000)   # adjust upper limit if your spikes are huge
 
 # --- Data update function ---
 t0 = None
