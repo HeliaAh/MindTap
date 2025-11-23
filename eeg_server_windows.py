@@ -92,7 +92,10 @@ def main():
         feature_csv_filename = f"eeg_log_{epoch}.csv"
         feature_csv_file = open(feature_csv_filename, 'w', newline='')
         feature_writer = csv.writer(feature_csv_file)
-        feature_writer.writerow(["timestamp", "feature_uV_rms_avg"])
+
+        # Dynamically creates  9 headers(tumestamp + 8 channels)
+        header_row = ["timestamp"] + [f"ch{i+1}" for i in range(len(chans))]
+        feature_writer.writerow(header_row)
 
         raw_csv_filename = f"eeg_raw_{epoch}.csv"
         raw_csv_file = open(raw_csv_filename, 'w', newline='')
@@ -111,8 +114,11 @@ def main():
                 time.sleep(SAMPLE_BATCH / fs if fs else TICK_SEC)
                 continue
 
+           
+            # --- Multi-Channel Output --- 
+
             # channel-wise filtering & RMS (1–40 Hz; 60 Hz notch)
-            rms_vals = []
+            filtered_channels = []
             for r in range(X.shape[0]):
                 v = X[r].copy()
                 DataFilter.detrend(v, DetrendOperations.CONSTANT.value)
@@ -121,15 +127,21 @@ def main():
                     DataFilter.remove_environmental_noise(v, fs, NoiseTypes.SIXTY.value)
                 except AttributeError:
                     DataFilter.perform_bandstop(v, fs, 58.0, 62.0, 4, FilterTypes.BUTTERWORTH.value, 0.0)
-                rms_vals.append(np.sqrt(np.mean(v**2)))
+                filtered_channels.append(v[-1])
 
-            feature = float(np.mean(rms_vals)) if rms_vals else 0.0
+            # Serialize the 8 channel values into a single, comma-separated string
+            feature = ",".join([f"{val:.6f}" for val in filtered_channels])            
             server.send_message_to_all(str(feature))
 
             timestamp = datetime.now().isoformat(timespec='milliseconds')
-            feature_writer.writerow([timestamp, feature])
+            
+            # feature_csv_file will now log all 8 channel values + timestamp
+            feature_writer.writerow([timestamp] + filtered_channels)
             feature_csv_file.flush()
-            print(f"[LOG] {timestamp} | {feature:.3f}")
+            
+            # Update the print statement to reflect all channels' value
+            log_str = " | ".join([f"{val:6.2f}" for val in filtered_channels])
+            print(f"[LOG] {timestamp} | {log_str}")
 
             # raw channel snapshot per sample with ISO ts (from Board timestamp)
             for j in range(X.shape[1]):
